@@ -169,7 +169,6 @@ class RKNNConverter:
 
         if with_acc_analysis:
             self.rknn.release()
-            from rknn.api import RKNN
             self.rknn = RKNN(verbose=False)
             self._accuracy_analysis()
 
