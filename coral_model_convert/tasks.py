@@ -64,17 +64,19 @@ class TaskManager:
             self.update_task_status(task_id, ConversionStatus.PROCESSING)
             logger.info(f"Starting conversion task {task_id}")
             
+            # Create a wrapper function to handle keyword arguments
+            def convert_wrapper():
+                return self.adapter.convert_model(
+                    source_format=source_format,
+                    target_format=target_format,
+                    model_path=model_path,
+                    output_dir=output_dir,
+                    **kwargs
+                )
+            
             # Run conversion in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                self.adapter.convert_model,
-                source_format,
-                target_format,
-                model_path,
-                output_dir,
-                **kwargs
-            )
+            result = await loop.run_in_executor(None, convert_wrapper)
             
             self.update_task_status(
                 task_id,
