@@ -2,6 +2,7 @@
 
 import os
 import asyncio
+import aiohttp
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,7 @@ from ..models import (
     ValidationResponse,
     AvailableConversionsResponse,
     RKNNConversionRequest,
+    RKNNConversionURLRequest,
     ConversionStatus
 )
 from ..tasks import task_manager
@@ -158,6 +160,84 @@ async def get_task_status(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     
     return task
+
+
+@router.post("/convert/rknn/url", response_model=ConversionResponse)
+async def convert_to_rknn_from_url(
+    background_tasks: BackgroundTasks,
+    request: RKNNConversionURLRequest
+):
+    """Convert ONNX model to RKNN format from URL"""
+    
+    try:
+        # Validate URL
+        if not request.model_url or not request.model_url.startswith(('http://', 'https://')):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid URL format. Must start with http:// or https://"
+            )
+        
+        # Validate file extension from URL
+        url_path = Path(request.model_url)
+        model_ext = url_path.suffix.lower()
+        if model_ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file format. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
+            )
+        
+        # Create conversion request
+        conversion_request = RKNNConversionRequest(
+            target_platform=request.target_platform,
+            hybrid_quant=request.hybrid_quant,
+            quantized_algorithm=request.quantized_algorithm,
+            optimization_level=request.optimization_level,
+            rknn_batchsize=request.rknn_batchsize,
+            with_acc_analysis=request.with_acc_analysis,
+            step=request.step
+        )
+        
+        # Validate parameters
+        validation_result = task_manager.adapter.validate_conversion_params(
+            source_format="onnx",
+            target_format="rknn",
+            **conversion_request.model_dump()
+        )
+        
+        if not validation_result["valid"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid parameters: {', '.join(validation_result['errors'])}"
+            )
+        
+        # Create task
+        task_id = task_manager.create_task()
+        
+        # Create output directory for this task
+        task_output_dir = OUTPUT_DIR / task_id
+        task_output_dir.mkdir(exist_ok=True)
+        
+        # Start conversion in background with URL download
+        model_path = TEMP_DIR / f"{task_id}_model.onnx"
+        
+        background_tasks.add_task(
+            task_manager.run_conversion_from_url,
+            task_id=task_id,
+            model_url=request.model_url,
+            model_path=str(model_path),
+            output_dir=str(task_output_dir),
+            **conversion_request.model_dump()
+        )
+        
+        return ConversionResponse(
+            task_id=task_id,
+            status=ConversionStatus.PENDING,
+            message="Conversion task created successfully from URL",
+            created_at=datetime.utcnow().isoformat()
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create conversion task: {str(e)}")
 
 
 @router.get("/tasks/{task_id}/download")

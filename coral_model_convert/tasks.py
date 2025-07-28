@@ -2,6 +2,7 @@
 
 import uuid
 import asyncio
+import aiohttp
 from datetime import datetime
 from typing import Dict, Any, Optional
 from enum import Enum
@@ -89,6 +90,65 @@ class TaskManager:
             
         except Exception as e:
             logger.exception(f"Conversion task {task_id} failed")
+            self.update_task_status(
+                task_id,
+                ConversionStatus.FAILED,
+                error_message=str(e)
+            )
+
+    async def run_conversion_from_url(
+        self,
+        task_id: str,
+        model_url: str,
+        model_path: str,
+        output_dir: str,
+        **kwargs
+    ):
+        """Download model from URL and run conversion in background"""
+        try:
+            self.update_task_status(task_id, ConversionStatus.PROCESSING)
+            logger.info(f"Starting URL-based conversion task {task_id}")
+            
+            # Download model from URL
+            logger.info(f"Downloading model from URL: {model_url}")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(model_url) as response:
+                    if response.status != 200:
+                        raise Exception(f"Failed to download model: HTTP {response.status}")
+                    
+                    content = await response.read()
+                    
+                    # Save downloaded content to file
+                    with open(model_path, "wb") as f:
+                        f.write(content)
+            
+            logger.info(f"Model downloaded and saved to: {model_path}")
+            
+            # Create a wrapper function for conversion
+            def convert_wrapper():
+                return self.adapter.convert_model(
+                    source_format="onnx",
+                    target_format="rknn",
+                    model_path=model_path,
+                    output_dir=output_dir,
+                    **kwargs
+                )
+            
+            # Run conversion in thread pool
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, convert_wrapper)
+            
+            self.update_task_status(
+                task_id,
+                ConversionStatus.COMPLETED,
+                output_path=result.get("output_path"),
+                metadata=result
+            )
+            
+            logger.info(f"URL-based conversion task {task_id} completed successfully")
+            
+        except Exception as e:
+            logger.exception(f"URL-based conversion task {task_id} failed")
             self.update_task_status(
                 task_id,
                 ConversionStatus.FAILED,

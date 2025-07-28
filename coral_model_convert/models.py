@@ -24,6 +24,18 @@ class RKNNConversionRequest(BaseModel):
     step: str = Field(default="onestep", description="Conversion step")
 
 
+class RKNNConversionURLRequest(BaseModel):
+    """Request model for RKNN conversion via URL"""
+    model_url: str = Field(description="URL of the ONNX model to convert")
+    target_platform: str = Field(default="rk3588", description="Target RKNN platform")
+    hybrid_quant: bool = Field(default=True, description="Use hybrid quantization")
+    quantized_algorithm: str = Field(default="normal", description="Quantization algorithm")
+    optimization_level: int = Field(default=3, ge=0, le=3, description="Optimization level")
+    rknn_batchsize: Optional[int] = Field(default=None, description="RKNN batch size")
+    with_acc_analysis: bool = Field(default=False, description="Perform accuracy analysis")
+    step: str = Field(default="onestep", description="Conversion step")
+
+
 class ConversionResponse(BaseModel):
     """Response model for conversion requests"""
     task_id: str = Field(description="Unique task identifier")
