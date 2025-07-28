@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  coral-model-convert:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./temp:/app/temp
+      - ./output:/app/output
+    restart: unless-stopped
+
+networks:
+  default:
+    name: coral-model-convert
