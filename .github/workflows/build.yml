@@ -49,6 +49,17 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Clean up disk space
+      run: |
+        # 清理 Docker 系统
+        docker system prune -f || true
+        # 清理 apt 缓存
+        sudo apt-get clean || true
+        # 清理临时文件
+        sudo rm -rf /tmp/* || true
+        # 显示磁盘使用情况
+        df -h
+
     - name: Set registry and image name
       id: registry
       run: |
@@ -100,9 +111,7 @@ jobs:
         tags: |
           type=ref,event=branch
           type=ref,event=tag
-          type=raw,value=latest,enable={{is_default_branch}}
           type=raw,value=${{ inputs.custom_tag }},enable=${{ inputs.custom_tag != '' }}
-          type=sha,prefix={{branch}}-
 
     - name: Build and push
       uses: docker/build-push-action@v5
@@ -113,12 +122,20 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: |
-          type=gha
           type=registry,ref=${{ steps.registry.outputs.IMAGE_NAME }}:buildcache
         cache-to: |
-          type=gha,mode=max
           type=registry,ref=${{ steps.registry.outputs.IMAGE_NAME }}:buildcache,mode=max
         build-args: |
           BUILDKIT_INLINE_CACHE=1
         provenance: false
         sbom: false
+
+    - name: Clean up after build
+      if: always()
+      run: |
+        # 清理 Docker 构建缓存
+        docker builder prune -f || true
+        # 清理 Docker 系统
+        docker system prune -f || true
+        # 显示最终磁盘使用情况
+        df -h
