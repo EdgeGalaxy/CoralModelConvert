@@ -178,7 +178,7 @@ async def convert_to_rknn_from_url(
             )
         
         # Validate file extension from URL
-        url_path = Path(request.model_url)
+        url_path = Path(request.model_url.split("?")[0])
         model_ext = url_path.suffix.lower()
         if model_ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(
