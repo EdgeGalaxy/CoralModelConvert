@@ -226,6 +226,7 @@ async def convert_to_rknn_from_url(
             model_url=request.model_url,
             model_path=str(model_path),
             output_dir=str(task_output_dir),
+            oss_key=request.oss_key,
             **conversion_request.model_dump()
         )
         

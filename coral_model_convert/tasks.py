@@ -6,11 +6,13 @@ import aiohttp
 from datetime import datetime
 from typing import Dict, Any, Optional
 from enum import Enum
+from pathlib import Path
 from loguru import logger
 
 from .models import ConversionStatus, ConversionResult
 from .adapter import ModelConverterAdapter
 from .exceptions import ModelConversionError
+from .utils.cloud import upload_file_to_cloud, is_cloud_enabled
 
 
 class TaskManager:
@@ -102,6 +104,7 @@ class TaskManager:
         model_url: str,
         model_path: str,
         output_dir: str,
+        oss_key: Optional[str] = None,
         **kwargs
     ):
         """Download model from URL and run conversion in background"""
@@ -137,6 +140,25 @@ class TaskManager:
             # Run conversion in thread pool
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, convert_wrapper)
+            
+            # Upload to cloud if oss_key is provided and cloud is enabled
+            cloud_key = None
+            if oss_key and is_cloud_enabled():
+                try:
+                    output_path = result.get("output_path")
+                    if output_path and Path(output_path).exists():
+                        logger.info(f"Uploading converted model to cloud: {oss_key}")
+                        cloud_key = await upload_file_to_cloud(output_path, oss_key)
+                        logger.info(f"Model uploaded successfully to: {cloud_key}")
+                except Exception as e:
+                    logger.error(f"Failed to upload to cloud: {str(e)}")
+                    # Don't fail the task if cloud upload fails
+            elif oss_key and not is_cloud_enabled():
+                logger.warning("OSS key provided but cloud storage is not configured")
+            
+            # Update result metadata to include cloud key
+            if cloud_key:
+                result["cloud_key"] = cloud_key
             
             self.update_task_status(
                 task_id,

@@ -34,6 +34,7 @@ class RKNNConversionURLRequest(BaseModel):
     rknn_batchsize: Optional[int] = Field(default=None, description="RKNN batch size")
     with_acc_analysis: bool = Field(default=False, description="Perform accuracy analysis")
     step: str = Field(default="onestep", description="Conversion step")
+    oss_key: Optional[str] = Field(default=None, description="OSS key for uploading converted model")
 
 
 class ConversionResponse(BaseModel):
