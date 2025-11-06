@@ -10,9 +10,6 @@ resources:
     component: fc3
     props:
       region: cn-hangzhou  # 按需修改区域
-      serviceName: coral-convert-svc
-      functionName: coral-convert
-      code: ./
 
       service:
         name: coral-convert-svc
@@ -25,6 +22,8 @@ resources:
         name: coral-convert
         description: FastAPI + Uvicorn (Docker image)
         runtime: custom-container
+        code:
+          src: ./
         # 使用环境变量注入镜像地址，便于 CI/CD 中安全替换
         customContainerConfig:
           image: ${env(ACR_IMAGE)}
