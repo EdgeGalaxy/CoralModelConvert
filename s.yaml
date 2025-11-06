@@ -10,10 +10,13 @@ resources:
     component: fc3
     props:
       region: cn-hangzhou  # 按需修改区域
+      serviceName: coral-convert-svc
+      functionName: coral-convert
 
       service:
         name: coral-convert-svc
         description: FastAPI model convert service (custom container)
+        internetAccess: true
         role: auto
         logConfig: auto  # 自动创建 SLS 日志项目与日志库
 
@@ -33,7 +36,6 @@ resources:
         cpu: 4                 # vCPU
         diskSize: 512          # MB，实例临时磁盘
         instanceConcurrency: 5 # 单实例并发
-        internetAccess: true
         environmentVariables:
           # FC 会注入 FC_SERVER_PORT；bootstrap 中已使用该变量
           HOST: 0.0.0.0
