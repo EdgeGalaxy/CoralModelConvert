@@ -31,4 +31,10 @@ jobs:
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
           tags: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:latest
+
+      - name: Inspect pushed image manifest
+        run: |
+          docker buildx imagetools inspect ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:latest
