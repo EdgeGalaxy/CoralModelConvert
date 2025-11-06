@@ -5,10 +5,6 @@ on:
     branches: [ main, master ]
   workflow_dispatch: {}
 
-env:
-  # Build metadata
-  IMAGE_TAG: ${{ github.sha }}
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -33,13 +29,12 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:${{ env.IMAGE_TAG }}
-            ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:latest
 
       - name: Export ACR_IMAGE for deploy
-        run: |
-          echo "ACR_IMAGE=${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:${IMAGE_TAG}" >> $GITHUB_ENV
+        run: echo "ACR_IMAGE=${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:latest" >> $GITHUB_ENV
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -56,11 +51,12 @@ jobs:
           ACCESS_KEY_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
           ACCESS_KEY_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
         run: |
-          s config add \
+          # Create or overwrite the 'default' access non-interactively
+          yes | s config add \
             --AccessKeyID "$ACCESS_KEY_ID" \
             --AccessKeySecret "$ACCESS_KEY_SECRET" \
             --AccountID "$ACCOUNT_ID" \
-            -a default -y || true
+            -a default || true
 
       - name: Deploy to Function Compute
         env:
