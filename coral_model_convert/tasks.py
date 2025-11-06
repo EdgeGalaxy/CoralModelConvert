@@ -13,7 +13,7 @@ from loguru import logger
 from .models import ConversionStatus, ConversionResult
 from .adapter import ModelConverterAdapter
 from .exceptions import ModelConversionError
-from .utils.cloud import upload_file_to_cloud, is_cloud_enabled
+from .utils.cloud import upload_file_to_cloud, is_cloud_enabled, generate_signed_url
 from .config import MAX_FILE_SIZE
 
 
@@ -177,10 +177,10 @@ class TaskManager:
     async def run_conversion_from_url(
         self,
         task_id: str,
-        model_url: str,
+        model_oss_key: str,
         model_path: str,
         output_dir: str,
-        oss_key: Optional[str] = None,
+        output_oss_key: Optional[str] = None,
         **kwargs
     ):
         """Download model from URL and run conversion in background"""
@@ -189,6 +189,8 @@ class TaskManager:
             logger.info(f"Starting URL-based conversion task {task_id}")
             
             # Download model from URL
+            logger.info(f"Generating signed URL for OSS key: {model_oss_key}")
+            model_url = await generate_signed_url(model_oss_key)
             logger.info(f"Downloading model from URL: {model_url}")
             timeout = aiohttp.ClientTimeout(total=300, sock_connect=30, sock_read=300)
             async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -231,22 +233,26 @@ class TaskManager:
             
             # Upload to cloud if oss_key is provided and cloud is enabled
             cloud_key = None
-            if oss_key and is_cloud_enabled():
+            if output_oss_key and is_cloud_enabled():
                 try:
                     output_path = result.get("output_path")
                     if output_path and Path(output_path).exists():
-                        logger.info(f"Uploading converted model to cloud: {oss_key}")
-                        cloud_key = await upload_file_to_cloud(output_path, oss_key)
+                        logger.info(f"Uploading converted model to cloud: {output_oss_key}")
+                        cloud_key = await upload_file_to_cloud(output_path, output_oss_key)
                         logger.info(f"Model uploaded successfully to: {cloud_key}")
                 except Exception as e:
                     logger.error(f"Failed to upload to cloud: {str(e)}")
                     # Don't fail the task if cloud upload fails
-            elif oss_key and not is_cloud_enabled():
+            elif output_oss_key and not is_cloud_enabled():
                 logger.warning("OSS key provided but cloud storage is not configured")
             
-            # Update result metadata to include cloud key
+            # Update result metadata to include cloud key and signed URL
             if cloud_key:
                 result["cloud_key"] = cloud_key
+                try:
+                    result["cloud_url"] = await generate_signed_url(cloud_key)
+                except Exception as e:
+                    logger.warning(f"Failed to generate signed URL for {cloud_key}: {e}")
             
             self.update_task_status(
                 task_id,

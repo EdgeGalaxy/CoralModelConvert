@@ -17,11 +17,23 @@ class CloudConfig:
         self.oss_bucket_name = os.getenv("OSS_BUCKET_NAME")
         
         # Validate required settings
-        if not all([self.oss_access_key_id, self.oss_access_key_secret, self.oss_endpoint, self.oss_bucket_name]):
-            logger.warning("OSS configuration incomplete. Cloud upload will be disabled.")
-            self.enabled = False
-        else:
-            self.enabled = True
+        required_vars = {
+            "OSS_ACCESS_KEY_ID": self.oss_access_key_id,
+            "OSS_ACCESS_KEY_SECRET": self.oss_access_key_secret,
+            "OSS_ENDPOINT": self.oss_endpoint,
+            "OSS_BUCKET_NAME": self.oss_bucket_name,
+        }
+        missing_vars = [name for name, value in required_vars.items() if not value]
+        if missing_vars:
+            missing_str = ", ".join(missing_vars)
+            message = (
+                "OSS 配置缺失，无法启动 CoralModelConvert。"
+                f" 请设置环境变量: {missing_str}"
+            )
+            logger.error(message)
+            raise RuntimeError(message)
+
+        self.enabled = True
     
     def get_bucket(self):
         """Get OSS bucket instance"""
@@ -102,3 +114,23 @@ async def upload_data_to_cloud(data: Union[str, bytes], key: str) -> str:
 def is_cloud_enabled() -> bool:
     """Check if cloud storage is properly configured"""
     return cloud_config.enabled
+
+
+async def generate_signed_url(key: str, expires: int = 3600) -> str:
+    """Generate a signed URL for the given OSS object key.
+
+    Args:
+        key (str): OSS object key that needs to be accessed.
+        expires (int): Expiration time in seconds for the signed URL.
+
+    Returns:
+        str: Signed URL for temporary access.
+
+    Raises:
+        ValueError: If cloud configuration is incomplete.
+    """
+    if not cloud_config.enabled:
+        raise ValueError("Cloud storage is not configured")
+
+    bucket = cloud_config.get_bucket()
+    return await asyncify(bucket.sign_url)("GET", key, expires=expires)

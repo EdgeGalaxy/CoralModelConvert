@@ -170,11 +170,11 @@ async def convert_to_rknn_from_url(
     """Convert ONNX model to RKNN format from URL"""
     
     try:
-        # Validate URL
-        if not request.model_url or not request.model_url.startswith(('http://', 'https://')):
+        # Validate OSS key
+        if not request.model_oss_key:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid URL format. Must start with http:// or https://"
+                detail="model_oss_key is required"
             )
         
         if request.callback_url:
@@ -190,8 +190,8 @@ async def convert_to_rknn_from_url(
                 )
         
         # Validate file extension from URL
-        url_path = Path(request.model_url.split("?")[0])
-        model_ext = url_path.suffix.lower()
+        key_path = Path(request.model_oss_key)
+        model_ext = key_path.suffix.lower()
         if model_ext not in ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
@@ -239,10 +239,10 @@ async def convert_to_rknn_from_url(
         background_tasks.add_task(
             task_manager.run_conversion_from_url,
             task_id=task_id,
-            model_url=request.model_url,
+            model_oss_key=request.model_oss_key,
             model_path=str(model_path),
             output_dir=str(task_output_dir),
-            oss_key=request.oss_key,
+            output_oss_key=request.output_oss_key,
             **conversion_request.model_dump()
         )
         

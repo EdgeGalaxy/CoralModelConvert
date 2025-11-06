@@ -25,8 +25,8 @@ class RKNNConversionRequest(BaseModel):
 
 
 class RKNNConversionURLRequest(BaseModel):
-    """Request model for RKNN conversion via URL"""
-    model_url: str = Field(description="URL of the ONNX model to convert")
+    """Request model for RKNN conversion via OSS key"""
+    model_oss_key: str = Field(description="OSS key of the ONNX model to convert")
     target_platform: str = Field(default="rk3588", description="Target RKNN platform")
     hybrid_quant: bool = Field(default=True, description="Use hybrid quantization")
     quantized_algorithm: str = Field(default="normal", description="Quantization algorithm")
@@ -34,7 +34,7 @@ class RKNNConversionURLRequest(BaseModel):
     rknn_batchsize: Optional[int] = Field(default=None, description="RKNN batch size")
     with_acc_analysis: bool = Field(default=False, description="Perform accuracy analysis")
     step: str = Field(default="onestep", description="Conversion step")
-    oss_key: Optional[str] = Field(default=None, description="OSS key for uploading converted model")
+    output_oss_key: Optional[str] = Field(default=None, description="OSS key for uploading converted RKNN model")
     callback_url: Optional[str] = Field(default=None, description="Callback URL for status updates")
     callback_token: Optional[str] = Field(default=None, description="Authorization token for callback requests")
     callback_payload: Optional[Dict[str, Any]] = Field(default=None, description="Opaque payload to echo in callbacks")
