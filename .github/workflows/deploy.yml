@@ -47,7 +47,8 @@ jobs:
           node-version: 18
 
       - name: Install Serverless Devs CLI
-        run: npm i -g @serverless-devs/cli
+        run: |
+          npm i -g @serverless-devs/s || npm i -g @serverless-devs/s --registry=https://registry.npmmirror.com
 
       - name: Configure s access
         env:
@@ -71,4 +72,3 @@ jobs:
           OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
           OSS_BUCKET_NAME: ${{ secrets.OSS_BUCKET_NAME }}
         run: s deploy -y
-
