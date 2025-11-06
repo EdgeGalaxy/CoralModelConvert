@@ -5,8 +5,7 @@ FROM python:3.11-slim as builder
 WORKDIR /app
 
 # 安装构建依赖并清理缓存
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
-    && apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y \
     curl \
     build-essential \
     && apt-get clean \
@@ -37,8 +36,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # 安装运行时依赖并清理缓存
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
-    && apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     && apt-get clean \
