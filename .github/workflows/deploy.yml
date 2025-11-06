@@ -1,141 +1,34 @@
-name: Build and Push Docker Image
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+name: Build and Push ACR Image
 
 on:
-  workflow_dispatch:
-    inputs:
-      push_image:
-        type: boolean
-        description: 'Push image to registry?'
-        default: true
-      custom_tag:
-        type: string
-        description: 'Custom tag (optional)'
-        default: ''
-      registry:
-        type: choice
-        description: 'Docker Registry'
-        default: 'docker.io'
-        options:
-          - 'docker.io'
-          - 'ghcr.io'
-          - 'custom'
-      custom_registry:
-        type: string
-        description: 'Custom registry URL (if registry is custom)'
-        default: ''
   push:
-    branches:
-      - 'main'
-      - 'dev'
-    tags:
-      - 'v*'
-
-env:
-  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-  DOCKERHUB_REGISTRY: ${{ secrets.DOCKERHUB_REGISTRY || 'docker.io' }}
-  GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    branches: [ main, master ]
+  workflow_dispatch: {}
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Clean up disk space
-      run: |
-        # 清理 Docker 系统
-        docker system prune -f || true
-        # 清理 apt 缓存
-        sudo apt-get clean || true
-        # 清理临时文件
-        sudo rm -rf /tmp/* || true
-        # 显示磁盘使用情况
-        df -h
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Set registry and image name
-      id: registry
-      run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          if [[ "${{ inputs.registry }}" == "custom" ]]; then
-            REGISTRY="${{ inputs.custom_registry }}"
-          elif [[ "${{ inputs.registry }}" == "ghcr.io" ]]; then
-            REGISTRY="ghcr.io"
-          else
-            REGISTRY="${{ env.DOCKERHUB_REGISTRY }}"
-          fi
-        else
-          REGISTRY="${{ env.DOCKERHUB_REGISTRY }}"
-        fi
-        
-        if [[ "$REGISTRY" == "ghcr.io" ]]; then
-          IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/coral-model-convert"
-        elif [[ "$REGISTRY" == "docker.io" || "$REGISTRY" == "" ]]; then
-          IMAGE_NAME="${{ env.DOCKER_USERNAME }}/coral-model-convert"
-        else
-          IMAGE_NAME="$REGISTRY/${{ env.DOCKER_USERNAME }}/coral-model-convert"
-        fi
-        
-        echo "REGISTRY=$REGISTRY" >> $GITHUB_OUTPUT
-        echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_OUTPUT
-        echo "Selected registry: $REGISTRY"
-        echo "Image name: $IMAGE_NAME"
-      
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-      with:
-        driver-opts: |
-          image=moby/buildkit:latest
-        buildkitd-flags: --debug
-      
-    - name: Login to Docker Registry
-      if: github.event_name != 'pull_request'
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ steps.registry.outputs.REGISTRY }}
-        username: ${{ steps.registry.outputs.REGISTRY == 'ghcr.io' && github.actor || env.DOCKER_USERNAME }}
-        password: ${{ steps.registry.outputs.REGISTRY == 'ghcr.io' && env.GHCR_TOKEN || env.DOCKER_PASSWORD }}
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ steps.registry.outputs.IMAGE_NAME }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=tag
-          type=raw,value=${{ inputs.custom_tag }},enable=${{ inputs.custom_tag != '' }}
-
-    - name: Build and push
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: ${{ (github.event_name != 'pull_request') && (github.event_name != 'workflow_dispatch' || inputs.push_image) }}
-        platforms: linux/amd64
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: |
-          type=registry,ref=${{ steps.registry.outputs.IMAGE_NAME }}:buildcache
-        cache-to: |
-          type=registry,ref=${{ steps.registry.outputs.IMAGE_NAME }}:buildcache,mode=max
-        build-args: |
-          BUILDKIT_INLINE_CACHE=1
-        provenance: false
-        sbom: false
-
-    - name: Clean up after build
-      if: always()
-      run: |
-        # 清理 Docker 构建缓存
-        docker builder prune -f || true
-        # 清理 Docker 系统
-        docker system prune -f || true
-        # 显示最终磁盘使用情况
-        df -h
+      - name: Build and Push Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:latest
