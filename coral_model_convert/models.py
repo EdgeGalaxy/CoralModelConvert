@@ -35,6 +35,9 @@ class RKNNConversionURLRequest(BaseModel):
     with_acc_analysis: bool = Field(default=False, description="Perform accuracy analysis")
     step: str = Field(default="onestep", description="Conversion step")
     oss_key: Optional[str] = Field(default=None, description="OSS key for uploading converted model")
+    callback_url: Optional[str] = Field(default=None, description="Callback URL for status updates")
+    callback_token: Optional[str] = Field(default=None, description="Authorization token for callback requests")
+    callback_payload: Optional[Dict[str, Any]] = Field(default=None, description="Opaque payload to echo in callbacks")
 
 
 class ConversionResponse(BaseModel):

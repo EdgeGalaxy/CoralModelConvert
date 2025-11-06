@@ -177,6 +177,18 @@ async def convert_to_rknn_from_url(
                 detail="Invalid URL format. Must start with http:// or https://"
             )
         
+        if request.callback_url:
+            if not request.callback_url.startswith(('http://', 'https://')):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid callback URL format. Must start with http:// or https://"
+                )
+            if len(request.callback_url) > 1024:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Callback URL is too long"
+                )
+        
         # Validate file extension from URL
         url_path = Path(request.model_url.split("?")[0])
         model_ext = url_path.suffix.lower()
@@ -211,7 +223,11 @@ async def convert_to_rknn_from_url(
             )
         
         # Create task
-        task_id = task_manager.create_task()
+        task_id = task_manager.create_task(
+            callback_url=request.callback_url,
+            callback_token=request.callback_token,
+            callback_payload=request.callback_payload,
+        )
         
         # Create output directory for this task
         task_output_dir = OUTPUT_DIR / task_id

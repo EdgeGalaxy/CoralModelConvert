@@ -4,15 +4,31 @@ import uuid
 import asyncio
 import aiohttp
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from enum import Enum
 from pathlib import Path
+from dataclasses import dataclass
 from loguru import logger
 
 from .models import ConversionStatus, ConversionResult
 from .adapter import ModelConverterAdapter
 from .exceptions import ModelConversionError
 from .utils.cloud import upload_file_to_cloud, is_cloud_enabled
+from .config import MAX_FILE_SIZE
+
+
+@dataclass
+class CallbackConfig:
+    """Callback configuration for task events"""
+
+    url: str
+    token: Optional[str] = None
+    payload: Optional[Dict[str, Any]] = None
+    notify_on: Tuple[ConversionStatus, ...] = (
+        ConversionStatus.PROCESSING,
+        ConversionStatus.COMPLETED,
+        ConversionStatus.FAILED,
+    )
 
 
 class TaskManager:
@@ -21,8 +37,15 @@ class TaskManager:
     def __init__(self):
         self.tasks: Dict[str, ConversionResult] = {}
         self.adapter = ModelConverterAdapter()
+        self.callbacks: Dict[str, CallbackConfig] = {}
     
-    def create_task(self, task_id: Optional[str] = None) -> str:
+    def create_task(
+        self,
+        task_id: Optional[str] = None,
+        callback_url: Optional[str] = None,
+        callback_token: Optional[str] = None,
+        callback_payload: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Create a new conversion task"""
         if task_id is None:
             task_id = str(uuid.uuid4())
@@ -34,6 +57,12 @@ class TaskManager:
         )
         
         self.tasks[task_id] = task
+        if callback_url:
+            self.callbacks[task_id] = CallbackConfig(
+                url=callback_url,
+                token=callback_token,
+                payload=callback_payload,
+            )
         return task_id
     
     def get_task(self, task_id: str) -> Optional[ConversionResult]:
@@ -52,6 +81,53 @@ class TaskManager:
             
             if status in [ConversionStatus.COMPLETED, ConversionStatus.FAILED]:
                 task.completed_at = datetime.utcnow().isoformat()
+            
+            callback_cfg = self.callbacks.get(task_id)
+            if callback_cfg and status in callback_cfg.notify_on:
+                asyncio.create_task(self._dispatch_callback(task_id, callback_cfg))
+                if status in [ConversionStatus.COMPLETED, ConversionStatus.FAILED]:
+                    # 清理已完成任务的回调配置
+                    self.callbacks.pop(task_id, None)
+
+    async def _dispatch_callback(self, task_id: str, callback_cfg: CallbackConfig):
+        """Send callback notification with task status"""
+        task = self.tasks.get(task_id)
+        if not task:
+            logger.warning(f"Callback skipped, task {task_id} not found")
+            return
+
+        payload = {
+            "task_id": task_id,
+            "status": task.status.value,
+            "metadata": task.metadata or {},
+            "error_message": task.error_message,
+            "callback_payload": callback_cfg.payload,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        headers = {"Content-Type": "application/json"}
+        if callback_cfg.token:
+            headers["Authorization"] = f"Bearer {callback_cfg.token}"
+
+        timeout = aiohttp.ClientTimeout(total=15)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    callback_cfg.url, json=payload, headers=headers
+                ) as response:
+                    if response.status >= 400:
+                        text = await response.text()
+                        logger.error(
+                            f"Callback to {callback_cfg.url} failed: {response.status} - {text}"
+                        )
+                    else:
+                        logger.info(
+                            f"Callback to {callback_cfg.url} succeeded for task {task_id}"
+                        )
+        except Exception as exc:
+            logger.exception(
+                f"Error while sending callback to {callback_cfg.url}: {exc}"
+            )
     
     async def run_conversion(
         self,
@@ -114,16 +190,28 @@ class TaskManager:
             
             # Download model from URL
             logger.info(f"Downloading model from URL: {model_url}")
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=300, sock_connect=30, sock_read=300)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(model_url) as response:
                     if response.status != 200:
                         raise Exception(f"Failed to download model: HTTP {response.status}")
                     
-                    content = await response.read()
+                    content_length = response.headers.get("Content-Length")
+                    if content_length:
+                        try:
+                            if int(content_length) > MAX_FILE_SIZE:
+                                raise Exception("Model file is larger than allowed maximum size")
+                        except ValueError:
+                            logger.warning("Invalid Content-Length header received; continuing with streaming download")
                     
-                    # Save downloaded content to file
+                    total_size = 0
+                    chunk_size = 1024 * 512  # 512KB
                     with open(model_path, "wb") as f:
-                        f.write(content)
+                        async for chunk in response.content.iter_chunked(chunk_size):
+                            total_size += len(chunk)
+                            if total_size > MAX_FILE_SIZE:
+                                raise Exception("Downloaded model exceeds maximum allowed size")
+                            f.write(chunk)
             
             logger.info(f"Model downloaded and saved to: {model_path}")
             
@@ -176,6 +264,12 @@ class TaskManager:
                 ConversionStatus.FAILED,
                 error_message=str(e)
             )
+            try:
+                path_obj = Path(model_path)
+                if path_obj.exists():
+                    path_obj.unlink()
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to cleanup temporary model file {model_path}: {cleanup_error}")
 
 
 # Global task manager instance
