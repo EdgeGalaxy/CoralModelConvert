@@ -1,0 +1,5 @@
+#!/bin/sh
+# 启动 Uvicorn 服务器
+# --host 0.0.0.0 监听所有网络接口
+# --port ${FC_SERVER_PORT:-9000} 使用FC注入的环境变量端口，如果不存在则默认为9000
+uvicorn run:app --host 0.0.0.0 --port ${FC_SERVER_PORT:-8000}

@@ -5,7 +5,8 @@ FROM python:3.11-slim as builder
 WORKDIR /app
 
 # 安装构建依赖并清理缓存
-RUN apt-get update && apt-get install -y \
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y \
     curl \
     build-essential \
     && apt-get clean \
@@ -36,8 +37,9 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # 安装运行时依赖并清理缓存
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y \
+    libgl1 \
     libglib2.0-0 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
@@ -48,6 +50,8 @@ COPY --from=builder /app/.venv /app/.venv
 
 # 复制项目文件
 COPY . .
+
+RUN chmod +x /app/bootstrap
 
 # 设置PATH使用虚拟环境
 ENV PATH="/app/.venv/bin:$PATH"
@@ -62,4 +66,4 @@ ENV HOST=0.0.0.0 \
 # 暴露端口
 EXPOSE 8000
 
-CMD ["python", "run.py"]
+CMD ["./bootstrap"]
