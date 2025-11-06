@@ -7,7 +7,7 @@ access: default
 
 resources:
   coral-model-convert:
-    component: devsapp/fc3
+    component: fc3
     props:
       region: cn-hangzhou  # 按需修改区域
 
