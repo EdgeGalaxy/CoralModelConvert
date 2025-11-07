@@ -27,6 +27,7 @@ class RKNNConversionRequest(BaseModel):
 class RKNNConversionURLRequest(BaseModel):
     """Request model for RKNN conversion via OSS key"""
     model_oss_key: str = Field(description="OSS key of the ONNX model to convert")
+    task_id: Optional[str] = Field(default=None, description="Optional external task id")
     target_platform: str = Field(default="rk3588", description="Target RKNN platform")
     hybrid_quant: bool = Field(default=True, description="Use hybrid quantization")
     quantized_algorithm: str = Field(default="normal", description="Quantization algorithm")

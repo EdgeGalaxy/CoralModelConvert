@@ -51,6 +51,7 @@ async def convert_to_rknn(
     background_tasks: BackgroundTasks,
     model_file: UploadFile = File(...),
     dataset_file: Optional[UploadFile] = File(None),
+    task_id: Optional[str] = Form(None),
     target_platform: str = Form("rk3588"),
     hybrid_quant: bool = Form(True),
     quantized_algorithm: str = Form("normal"),
@@ -100,8 +101,8 @@ async def convert_to_rknn(
             detail=f"Invalid parameters: {', '.join(validation_result['errors'])}"
         )
     
-    # Create task
-    task_id = task_manager.create_task()
+    # Create task (use provided task_id if any)
+    task_id = task_manager.create_task(task_id=task_id)
     
     # Save uploaded files
     model_path = TEMP_DIR / f"{task_id}_{model_file.filename}"
@@ -171,6 +172,7 @@ async def get_task_status(task_id: str):
 async def convert_to_rknn_from_url(
     request: RKNNConversionURLRequest,
     background_tasks: BackgroundTasks,
+    is_sync: bool = False,
 ):
     """Convert ONNX model to RKNN format from URL"""
     
@@ -227,8 +229,9 @@ async def convert_to_rknn_from_url(
                 detail=f"Invalid parameters: {', '.join(validation_result['errors'])}"
             )
         
-        # Create task
+        # Create task (use provided task_id if any)
         task_id = task_manager.create_task(
+            task_id=request.task_id,
             callback_url=request.callback_url,
             callback_token=request.callback_token,
             callback_payload=request.callback_payload,
@@ -238,12 +241,12 @@ async def convert_to_rknn_from_url(
         task_output_dir = OUTPUT_DIR / task_id
         task_output_dir.mkdir(exist_ok=True)
         
-        # Schedule conversion in background instead of inline
+        # Prepare paths
         model_path = TEMP_DIR / f"{task_id}_model.onnx"
 
-        # Directly schedule on the event loop to avoid BackgroundTasks issues
-        asyncio.create_task(
-            task_manager.run_conversion_from_url(
+        if is_sync:
+            # Run conversion synchronously
+            await task_manager.run_conversion_from_url(
                 task_id=task_id,
                 model_oss_key=request.model_oss_key,
                 model_path=str(model_path),
@@ -251,14 +254,39 @@ async def convert_to_rknn_from_url(
                 output_oss_key=request.output_oss_key,
                 **conversion_request.model_dump(),
             )
-        )
 
-        return ConversionResponse(
-            task_id=task_id,
-            status=ConversionStatus.PENDING,
-            message="Conversion task created successfully from URL",
-            created_at=datetime.utcnow().isoformat(),
-        )
+            task = task_manager.get_task(task_id)
+            status = task.status if task else ConversionStatus.FAILED
+            message = (
+                "Conversion completed successfully from URL"
+                if status == ConversionStatus.COMPLETED
+                else "Conversion finished with errors from URL"
+            )
+
+            return ConversionResponse(
+                task_id=task_id,
+                status=status,
+                message=message,
+                created_at=(task.created_at if task else datetime.utcnow().isoformat()),
+            )
+        else:
+            # Schedule conversion using FastAPI BackgroundTasks
+            background_tasks.add_task(
+                task_manager.run_conversion_from_url,
+                task_id=task_id,
+                model_oss_key=request.model_oss_key,
+                model_path=str(model_path),
+                output_dir=str(task_output_dir),
+                output_oss_key=request.output_oss_key,
+                **conversion_request.model_dump(),
+            )
+
+            return ConversionResponse(
+                task_id=task_id,
+                status=ConversionStatus.PENDING,
+                message="Conversion task created successfully from URL",
+                created_at=datetime.utcnow().isoformat(),
+            )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create conversion task: {str(e)}")
@@ -282,92 +310,3 @@ async def download_result(task_id: str):
         filename=Path(task.output_path).name,
         media_type="application/octet-stream"
     )
-
-
-@router.post("/test/download", response_model=DownloadTestResponse)
-async def test_download_source(request: DownloadTestRequest):
-    """Test if a third-party URL or an OSS key can be downloaded locally.
-
-    Downloads to a temporary file under TEMP_DIR and cleans it up after the check.
-    Enforces MAX_FILE_SIZE unless a smaller `max_size` is provided in the request.
-    """
-    # Validate parameters: exactly one of url or model_oss_key
-    if bool(request.url) == bool(request.model_oss_key):
-        raise HTTPException(status_code=400, detail="Provide exactly one of 'url' or 'model_oss_key'")
-
-    max_size = request.max_size or MAX_FILE_SIZE
-    temp_id = uuid.uuid4().hex
-
-    if request.url:
-        # Validate URL format
-        if not request.url.startswith(("http://", "https://")):
-            raise HTTPException(status_code=400, detail="Invalid URL. Must start with http:// or https://")
-
-        temp_path = TEMP_DIR / f"download_test_{temp_id}"
-        total_size = 0
-        try:
-            timeout = aiohttp.ClientTimeout(total=60, sock_connect=15, sock_read=60)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(request.url) as response:
-                    if response.status != 200:
-                        return DownloadTestResponse(
-                            ok=False, source="url", size=None,
-                            message=f"HTTP {response.status} while downloading"
-                        )
-
-                    content_length = response.headers.get("Content-Length")
-                    if content_length:
-                        try:
-                            if int(content_length) > max_size:
-                                return DownloadTestResponse(
-                                    ok=False, source="url", size=None,
-                                    message="Content length exceeds maximum allowed size"
-                                )
-                        except Exception:
-                            # Proceed with streaming
-                            pass
-
-                    chunk_size = 1024 * 512  # 512KB
-                    with open(temp_path, "wb") as f:
-                        async for chunk in response.content.iter_chunked(chunk_size):
-                            total_size += len(chunk)
-                            if total_size > max_size:
-                                return DownloadTestResponse(
-                                    ok=False, source="url", size=total_size,
-                                    message="Downloaded size exceeds maximum allowed size"
-                                )
-                            f.write(chunk)
-
-            return DownloadTestResponse(
-                ok=True, source="url", size=total_size, message=f"Downloaded to {temp_path.name} (cleaned up)"
-            )
-        except Exception as e:
-            return DownloadTestResponse(
-                ok=False, source="url", size=total_size or None, message=str(e)
-            )
-        finally:
-            try:
-                if temp_path.exists():
-                    temp_path.unlink()
-            except Exception:
-                pass
-
-    else:
-        # OSS key path
-        temp_path = TEMP_DIR / f"download_test_{temp_id}"
-        try:
-            local_path = await download_file_from_cloud(request.model_oss_key, str(temp_path), max_size=max_size)
-            size = Path(local_path).stat().st_size if Path(local_path).exists() else None
-            return DownloadTestResponse(
-                ok=True, source="oss", size=size, message=f"Downloaded to {Path(local_path).name} (cleaned up)"
-            )
-        except Exception as e:
-            return DownloadTestResponse(
-                ok=False, source="oss", size=None, message=str(e)
-            )
-        finally:
-            try:
-                if temp_path.exists():
-                    temp_path.unlink()
-            except Exception:
-                pass
