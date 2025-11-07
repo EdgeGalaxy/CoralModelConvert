@@ -168,7 +168,8 @@ async def get_task_status(task_id: str):
 
 @router.post("/convert/rknn/url", response_model=ConversionResponse)
 async def convert_to_rknn_from_url(
-    request: RKNNConversionURLRequest
+    request: RKNNConversionURLRequest,
+    background_tasks: BackgroundTasks,
 ):
     """Convert ONNX model to RKNN format from URL"""
     
@@ -236,10 +237,11 @@ async def convert_to_rknn_from_url(
         task_output_dir = OUTPUT_DIR / task_id
         task_output_dir.mkdir(exist_ok=True)
         
-        # Execute conversion inline (no background task)
+        # Schedule conversion in background instead of inline
         model_path = TEMP_DIR / f"{task_id}_model.onnx"
 
-        await task_manager.run_conversion_from_url(
+        background_tasks.add_task(
+            task_manager.run_conversion_from_url,
             task_id=task_id,
             model_oss_key=request.model_oss_key,
             model_path=str(model_path),
@@ -248,20 +250,11 @@ async def convert_to_rknn_from_url(
             **conversion_request.model_dump(),
         )
 
-        # Build response based on final task status
-        final_task = task_manager.get_task(task_id)
-        final_status = final_task.status if final_task else ConversionStatus.FAILED
-        message = (
-            "Conversion completed successfully from URL"
-            if final_status == ConversionStatus.COMPLETED
-            else "Conversion failed from URL"
-        )
-
         return ConversionResponse(
             task_id=task_id,
-            status=final_status,
-            message=message,
-            created_at=final_task.created_at if final_task else datetime.utcnow().isoformat(),
+            status=ConversionStatus.PENDING,
+            message="Conversion task created successfully from URL",
+            created_at=datetime.utcnow().isoformat(),
         )
         
     except Exception as e:

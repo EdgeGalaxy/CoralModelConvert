@@ -121,8 +121,53 @@ class RKNNConverter:
             raise ModelLoadError("Failed to load ONNX model")
 
         logger.debug("Building model...")
-        if self.rknn.build(do_quantization=self.do_quant, dataset=self.dataset, rknn_batch_size=self.rknn_batchsize) != 0:
-            raise ModelBuildError("Failed to build model")
+        try:
+            build_ret = self.rknn.build(
+                do_quantization=self.do_quant,
+                dataset=self.dataset,
+                rknn_batch_size=self.rknn_batchsize,
+            )
+        except Exception:
+            logger.warning(
+                f"Build raised exception with optimization_level={self.optimization_level}. Retrying with optimization_level=0..."
+            )
+            build_ret = -1
+        if build_ret != 0:
+            logger.warning(
+                f"Build failed with optimization_level={self.optimization_level}. Retrying with optimization_level=0..."
+            )
+            try:
+                # Recreate RKNN instance and retry with lower optimization level
+                self.rknn.release()
+                from rknn.api import RKNN  # re-import to ensure symbol is available in this scope
+                self.rknn = RKNN(verbose=False)
+
+                # Re-config with level 0
+                self.rknn.config(
+                    mean_values=self.mean_values,
+                    std_values=self.std_values,
+                    target_platform=self.target_platform,
+                    optimization_level=0,
+                    quantized_algorithm=self.quantized_algorithm,
+                )
+                # Reload model and rebuild
+                if self.rknn.load_onnx(model=str(self.onnx_model)) != 0:
+                    raise ModelLoadError("Failed to load ONNX model on retry with optimization_level=0")
+                if (
+                    self.rknn.build(
+                        do_quantization=self.do_quant,
+                        dataset=self.dataset,
+                        rknn_batch_size=self.rknn_batchsize,
+                    )
+                    != 0
+                ):
+                    raise ModelBuildError(
+                        "Failed to build model even after retry with optimization_level=0"
+                    )
+                logger.info("Build succeeded on retry with optimization_level=0")
+            except Exception:
+                logger.exception("Retry with optimization_level=0 failed")
+                raise
 
         output_path = self.output_dir / f"{self.onnx_model.stem}.rknn"
         logger.debug(f"Exporting RKNN model to {output_path}...")
@@ -154,8 +199,47 @@ class RKNNConverter:
             raise ModelLoadError("Failed to load ONNX model")
 
         logger.debug("Running hybrid quantization step 1...")
-        if self.rknn.hybrid_quantization_step1(dataset=self.dataset, proposal=True, rknn_batch_size=self.rknn_batchsize) != 0:
-            raise ModelConversionError("Hybrid quantization step 1 failed")
+        try:
+            hq1_ret = self.rknn.hybrid_quantization_step1(
+                dataset=self.dataset, proposal=True, rknn_batch_size=self.rknn_batchsize
+            )
+        except Exception:
+            logger.warning(
+                f"Hybrid quantization step1 raised exception with optimization_level={self.optimization_level}. Retrying with optimization_level=0..."
+            )
+            hq1_ret = -1
+        if hq1_ret != 0:
+            logger.warning(
+                f"Hybrid quantization step1 failed with optimization_level={self.optimization_level}. Retrying with optimization_level=0..."
+            )
+            try:
+                # Recreate RKNN instance and retry with lower optimization level
+                self.rknn.release()
+                from rknn.api import RKNN  # re-import to ensure symbol is available in this scope
+                self.rknn = RKNN(verbose=False)
+
+                self.rknn.config(
+                    mean_values=self.mean_values,
+                    std_values=self.std_values,
+                    target_platform=self.target_platform,
+                    optimization_level=0,
+                    quantized_algorithm=self.quantized_algorithm,
+                )
+                if self.rknn.load_onnx(model=str(self.onnx_model)) != 0:
+                    raise ModelLoadError("Failed to load ONNX model on retry with optimization_level=0 (step1)")
+                if (
+                    self.rknn.hybrid_quantization_step1(
+                        dataset=self.dataset, proposal=True, rknn_batch_size=self.rknn_batchsize
+                    )
+                    != 0
+                ):
+                    raise ModelConversionError(
+                        "Hybrid quantization step 1 failed even after retry with optimization_level=0"
+                    )
+                logger.info("Hybrid quantization step1 succeeded on retry with optimization_level=0")
+            except Exception:
+                logger.exception("Retry of hybrid quantization step1 with optimization_level=0 failed")
+                raise
 
         # Move generated files to output directory
         generated_files = []
@@ -169,6 +253,7 @@ class RKNNConverter:
 
         if with_acc_analysis:
             self.rknn.release()
+            from rknn.api import RKNN  # ensure symbol in scope
             self.rknn = RKNN(verbose=False)
             self._accuracy_analysis()
 
