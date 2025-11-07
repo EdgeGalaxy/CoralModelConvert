@@ -3,6 +3,7 @@
 import os
 import asyncio
 import aiohttp
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -168,7 +169,6 @@ async def get_task_status(task_id: str):
 
 @router.post("/convert/rknn/url", response_model=ConversionResponse)
 async def convert_to_rknn_from_url(
-    background_tasks: BackgroundTasks,
     request: RKNNConversionURLRequest
 ):
     """Convert ONNX model to RKNN format from URL"""
@@ -237,18 +237,29 @@ async def convert_to_rknn_from_url(
         task_output_dir = OUTPUT_DIR / task_id
         task_output_dir.mkdir(exist_ok=True)
         
-        # Start conversion in background with URL download
+        # Start conversion in background with URL download (without BackgroundTasks)
         model_path = TEMP_DIR / f"{task_id}_model.onnx"
         
-        background_tasks.add_task(
-            task_manager.run_conversion_from_url,
-            task_id=task_id,
-            model_oss_key=request.model_oss_key,
-            model_path=str(model_path),
-            output_dir=str(task_output_dir),
-            output_oss_key=request.output_oss_key,
-            **conversion_request.model_dump()
-        )
+        # Run in a dedicated background thread with its own event loop
+        def _runner():
+            try:
+                asyncio.run(
+                    task_manager.run_conversion_from_url(
+                        task_id=task_id,
+                        model_oss_key=request.model_oss_key,
+                        model_path=str(model_path),
+                        output_dir=str(task_output_dir),
+                        output_oss_key=request.output_oss_key,
+                        **conversion_request.model_dump(),
+                    )
+                )
+            except Exception:
+                # Any exception is handled inside run_conversion_from_url,
+                # this is a last-resort guard to avoid thread crashes.
+                pass
+
+        t = threading.Thread(target=_runner, name=f"rknn-url-{task_id}", daemon=True)
+        t.start()
         
         return ConversionResponse(
             task_id=task_id,
