@@ -13,7 +13,12 @@ from loguru import logger
 from .models import ConversionStatus, ConversionResult
 from .adapter import ModelConverterAdapter
 from .exceptions import ModelConversionError
-from .utils.cloud import upload_file_to_cloud, is_cloud_enabled, generate_signed_url
+from .utils.cloud import (
+    upload_file_to_cloud,
+    is_cloud_enabled,
+    generate_signed_url,
+    download_file_from_cloud,
+)
 from .config import MAX_FILE_SIZE
 
 
@@ -183,39 +188,15 @@ class TaskManager:
         output_oss_key: Optional[str] = None,
         **kwargs
     ):
-        """Download model from URL and run conversion in background"""
+        """Download model via OSS key and run conversion in background"""
         try:
             self.update_task_status(task_id, ConversionStatus.PROCESSING)
             logger.info(f"Starting URL-based conversion task {task_id}")
             
-            # Download model from URL
-            logger.info(f"Generating signed URL for OSS key: {model_oss_key}")
-            model_url = await generate_signed_url(model_oss_key)
-            logger.info(f"Downloading model from URL: {model_url}")
-            timeout = aiohttp.ClientTimeout(total=300, sock_connect=30, sock_read=300)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(model_url) as response:
-                    if response.status != 200:
-                        raise Exception(f"Failed to download model: HTTP {response.status}")
-                    
-                    content_length = response.headers.get("Content-Length")
-                    if content_length:
-                        try:
-                            if int(content_length) > MAX_FILE_SIZE:
-                                raise Exception("Model file is larger than allowed maximum size")
-                        except ValueError:
-                            logger.warning("Invalid Content-Length header received; continuing with streaming download")
-                    
-                    total_size = 0
-                    chunk_size = 1024 * 512  # 512KB
-                    with open(model_path, "wb") as f:
-                        async for chunk in response.content.iter_chunked(chunk_size):
-                            total_size += len(chunk)
-                            if total_size > MAX_FILE_SIZE:
-                                raise Exception("Downloaded model exceeds maximum allowed size")
-                            f.write(chunk)
-            
-            logger.info(f"Model downloaded and saved to: {model_path}")
+            # Download model directly from OSS to target path
+            logger.info(f"Downloading model from OSS: {model_oss_key} -> {model_path}")
+            await download_file_from_cloud(model_oss_key, model_path, max_size=MAX_FILE_SIZE)
+            logger.info(f"Model downloaded to: {model_path}")
             
             # Create a wrapper function for conversion
             def convert_wrapper():

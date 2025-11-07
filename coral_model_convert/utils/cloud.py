@@ -5,6 +5,7 @@ import os
 import oss2
 from asyncer import asyncify
 from loguru import logger
+from pathlib import Path
 
 
 class CloudConfig:
@@ -134,3 +135,71 @@ async def generate_signed_url(key: str, expires: int = 3600) -> str:
 
     bucket = cloud_config.get_bucket()
     return await asyncify(bucket.sign_url)("GET", key, expires=expires)
+
+
+async def download_file_from_cloud(key: str, file_path: str, max_size: Optional[int] = None) -> str:
+    """Download a file from cloud storage to a local path.
+
+    Args:
+        key (str): OSS object key to download.
+        file_path (str): Local filesystem path to save the file.
+        max_size (Optional[int]): Optional maximum allowed size in bytes.
+
+    Returns:
+        str: Local path where the file was saved.
+
+    Raises:
+        ValueError: If cloud storage is not configured or size exceeds max_size.
+        Exception: If download fails for other reasons.
+    """
+    if not cloud_config.enabled:
+        raise ValueError("Cloud storage is not configured")
+
+    try:
+        bucket = cloud_config.get_bucket()
+
+        # Pre-check size via HEAD if requested
+        if max_size is not None:
+            try:
+                head = await asyncify(bucket.head_object)(key)
+                # Try headers, fall back to attribute
+                content_length = None
+                if hasattr(head, "headers") and head.headers is not None:
+                    cl = head.headers.get("content-length") or head.headers.get("Content-Length")
+                    if cl is not None:
+                        try:
+                            content_length = int(cl)
+                        except Exception:
+                            content_length = None
+                if content_length is None and hasattr(head, "content_length"):
+                    content_length = head.content_length
+
+                if content_length is not None and max_size is not None and content_length > max_size:
+                    raise ValueError("Object is larger than allowed maximum size")
+            except Exception as e:
+                # Not fatal for HEAD failures; log and continue with best-effort download
+                logger.warning(f"Failed to get object size for {key}: {e} Continuing to download and will verify size after.")
+
+        # Ensure local directory exists
+        dest = Path(file_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        # Download to file
+        await asyncify(bucket.get_object_to_file)(key, str(dest))
+
+        # Post-check size if requested
+        if max_size is not None and dest.exists():
+            size = dest.stat().st_size
+            if size > max_size:
+                try:
+                    dest.unlink()
+                except Exception:
+                    pass
+                raise ValueError("Downloaded file exceeds maximum allowed size")
+
+        logger.info(f"File downloaded successfully from cloud: {key} -> {file_path}")
+        return str(dest)
+
+    except Exception as e:
+        logger.error(f"Failed to download file from cloud: {key} -> {file_path}: {e}")
+        raise
