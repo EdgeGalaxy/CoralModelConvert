@@ -22,6 +22,12 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
+      - name: Derive short SHA tag
+        id: vars
+        shell: bash
+        run: |
+          echo "sha_short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
       - name: Build and Push Image
         uses: docker/build-push-action@v5
         with:
@@ -34,8 +40,11 @@ jobs:
           provenance: false
           sbom: false
           outputs: type=registry,oci-mediatypes=false
-          tags: ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:latest
+          tags: |
+            ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:latest
+            ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:${{ steps.vars.outputs.sha_short }}
 
       - name: Inspect pushed image manifest
         run: |
           docker buildx imagetools inspect ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:latest
+          docker buildx imagetools inspect ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_IMAGE_REPO }}:${{ steps.vars.outputs.sha_short }}

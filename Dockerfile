@@ -35,10 +35,17 @@ FROM python:3.11-slim
 # 设置工作目录
 WORKDIR /app
 
-# 安装运行时依赖并清理缓存
-RUN apt-get update && apt-get install -y \
+# 设置时区为上海
+ENV TZ=Asia/Shanghai
+
+# 安装运行时依赖并清理缓存（包含 tzdata 并设置本地时间）
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
+    tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /tmp/*
