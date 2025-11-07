@@ -3,7 +3,6 @@
 import os
 import asyncio
 import aiohttp
-import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -237,35 +236,32 @@ async def convert_to_rknn_from_url(
         task_output_dir = OUTPUT_DIR / task_id
         task_output_dir.mkdir(exist_ok=True)
         
-        # Start conversion in background with URL download (without BackgroundTasks)
+        # Execute conversion inline (no background task)
         model_path = TEMP_DIR / f"{task_id}_model.onnx"
-        
-        # Run in a dedicated background thread with its own event loop
-        def _runner():
-            try:
-                asyncio.run(
-                    task_manager.run_conversion_from_url(
-                        task_id=task_id,
-                        model_oss_key=request.model_oss_key,
-                        model_path=str(model_path),
-                        output_dir=str(task_output_dir),
-                        output_oss_key=request.output_oss_key,
-                        **conversion_request.model_dump(),
-                    )
-                )
-            except Exception:
-                # Any exception is handled inside run_conversion_from_url,
-                # this is a last-resort guard to avoid thread crashes.
-                pass
 
-        t = threading.Thread(target=_runner, name=f"rknn-url-{task_id}", daemon=True)
-        t.start()
-        
+        await task_manager.run_conversion_from_url(
+            task_id=task_id,
+            model_oss_key=request.model_oss_key,
+            model_path=str(model_path),
+            output_dir=str(task_output_dir),
+            output_oss_key=request.output_oss_key,
+            **conversion_request.model_dump(),
+        )
+
+        # Build response based on final task status
+        final_task = task_manager.get_task(task_id)
+        final_status = final_task.status if final_task else ConversionStatus.FAILED
+        message = (
+            "Conversion completed successfully from URL"
+            if final_status == ConversionStatus.COMPLETED
+            else "Conversion failed from URL"
+        )
+
         return ConversionResponse(
             task_id=task_id,
-            status=ConversionStatus.PENDING,
-            message="Conversion task created successfully from URL",
-            created_at=datetime.utcnow().isoformat()
+            status=final_status,
+            message=message,
+            created_at=final_task.created_at if final_task else datetime.utcnow().isoformat(),
         )
         
     except Exception as e:
