@@ -76,3 +76,18 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     timestamp: str
+
+
+class DownloadTestRequest(BaseModel):
+    """Request to test if a source can be downloaded locally"""
+    url: Optional[str] = Field(default=None, description="Third-party URL to test download")
+    model_oss_key: Optional[str] = Field(default=None, description="OSS object key to test download")
+    max_size: Optional[int] = Field(default=None, description="Optional max allowed size in bytes")
+
+
+class DownloadTestResponse(BaseModel):
+    """Response for download test"""
+    ok: bool = Field(description="Whether the download test succeeded")
+    source: str = Field(description="'url' or 'oss' depending on source tested")
+    size: Optional[int] = Field(default=None, description="Downloaded size in bytes if available")
+    message: str = Field(description="Additional information or error message")

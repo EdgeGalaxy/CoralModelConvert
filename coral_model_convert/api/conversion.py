@@ -16,11 +16,15 @@ from ..models import (
     AvailableConversionsResponse,
     RKNNConversionRequest,
     RKNNConversionURLRequest,
-    ConversionStatus
+    ConversionStatus,
+    DownloadTestRequest,
+    DownloadTestResponse,
 )
 from ..tasks import task_manager
 from ..config import MAX_FILE_SIZE, ALLOWED_EXTENSIONS, TEMP_DIR, OUTPUT_DIR
 from ..exceptions import ModelConversionError
+from ..utils.cloud import download_file_from_cloud
+import uuid
 
 router = APIRouter(prefix="/api/v1", tags=["conversion"])
 
@@ -275,3 +279,92 @@ async def download_result(task_id: str):
         filename=Path(task.output_path).name,
         media_type="application/octet-stream"
     )
+
+
+@router.post("/test/download", response_model=DownloadTestResponse)
+async def test_download_source(request: DownloadTestRequest):
+    """Test if a third-party URL or an OSS key can be downloaded locally.
+
+    Downloads to a temporary file under TEMP_DIR and cleans it up after the check.
+    Enforces MAX_FILE_SIZE unless a smaller `max_size` is provided in the request.
+    """
+    # Validate parameters: exactly one of url or model_oss_key
+    if bool(request.url) == bool(request.model_oss_key):
+        raise HTTPException(status_code=400, detail="Provide exactly one of 'url' or 'model_oss_key'")
+
+    max_size = request.max_size or MAX_FILE_SIZE
+    temp_id = uuid.uuid4().hex
+
+    if request.url:
+        # Validate URL format
+        if not request.url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="Invalid URL. Must start with http:// or https://")
+
+        temp_path = TEMP_DIR / f"download_test_{temp_id}"
+        total_size = 0
+        try:
+            timeout = aiohttp.ClientTimeout(total=60, sock_connect=15, sock_read=60)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(request.url) as response:
+                    if response.status != 200:
+                        return DownloadTestResponse(
+                            ok=False, source="url", size=None,
+                            message=f"HTTP {response.status} while downloading"
+                        )
+
+                    content_length = response.headers.get("Content-Length")
+                    if content_length:
+                        try:
+                            if int(content_length) > max_size:
+                                return DownloadTestResponse(
+                                    ok=False, source="url", size=None,
+                                    message="Content length exceeds maximum allowed size"
+                                )
+                        except Exception:
+                            # Proceed with streaming
+                            pass
+
+                    chunk_size = 1024 * 512  # 512KB
+                    with open(temp_path, "wb") as f:
+                        async for chunk in response.content.iter_chunked(chunk_size):
+                            total_size += len(chunk)
+                            if total_size > max_size:
+                                return DownloadTestResponse(
+                                    ok=False, source="url", size=total_size,
+                                    message="Downloaded size exceeds maximum allowed size"
+                                )
+                            f.write(chunk)
+
+            return DownloadTestResponse(
+                ok=True, source="url", size=total_size, message=f"Downloaded to {temp_path.name} (cleaned up)"
+            )
+        except Exception as e:
+            return DownloadTestResponse(
+                ok=False, source="url", size=total_size or None, message=str(e)
+            )
+        finally:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except Exception:
+                pass
+
+    else:
+        # OSS key path
+        temp_path = TEMP_DIR / f"download_test_{temp_id}"
+        try:
+            local_path = await download_file_from_cloud(request.model_oss_key, str(temp_path), max_size=max_size)
+            size = Path(local_path).stat().st_size if Path(local_path).exists() else None
+            return DownloadTestResponse(
+                ok=True, source="oss", size=size, message=f"Downloaded to {Path(local_path).name} (cleaned up)"
+            )
+        except Exception as e:
+            return DownloadTestResponse(
+                ok=False, source="oss", size=None, message=str(e)
+            )
+        finally:
+            try:
+                if temp_path.exists():
+                    temp_path.unlink()
+            except Exception:
+                pass
