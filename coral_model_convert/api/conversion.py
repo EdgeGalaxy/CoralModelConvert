@@ -1,6 +1,5 @@
 """API routers for model conversion endpoints"""
 
-import os
 import asyncio
 import aiohttp
 from datetime import datetime
@@ -129,14 +128,16 @@ async def convert_to_rknn(
         if dataset_path:
             conversion_params["dataset_file"] = str(dataset_path)
         
-        background_tasks.add_task(
-            task_manager.run_conversion,
-            task_id=task_id,
-            source_format="onnx",
-            target_format="rknn",
-            model_path=str(model_path),
-            output_dir=str(task_output_dir),
-            **conversion_params
+        # Directly schedule on the event loop to avoid BackgroundTasks issues
+        asyncio.create_task(
+            task_manager.run_conversion(
+                task_id=task_id,
+                source_format="onnx",
+                target_format="rknn",
+                model_path=str(model_path),
+                output_dir=str(task_output_dir),
+                **conversion_params,
+            )
         )
         
         return ConversionResponse(
@@ -240,14 +241,16 @@ async def convert_to_rknn_from_url(
         # Schedule conversion in background instead of inline
         model_path = TEMP_DIR / f"{task_id}_model.onnx"
 
-        background_tasks.add_task(
-            task_manager.run_conversion_from_url,
-            task_id=task_id,
-            model_oss_key=request.model_oss_key,
-            model_path=str(model_path),
-            output_dir=str(task_output_dir),
-            output_oss_key=request.output_oss_key,
-            **conversion_request.model_dump(),
+        # Directly schedule on the event loop to avoid BackgroundTasks issues
+        asyncio.create_task(
+            task_manager.run_conversion_from_url(
+                task_id=task_id,
+                model_oss_key=request.model_oss_key,
+                model_path=str(model_path),
+                output_dir=str(task_output_dir),
+                output_oss_key=request.output_oss_key,
+                **conversion_request.model_dump(),
+            )
         )
 
         return ConversionResponse(

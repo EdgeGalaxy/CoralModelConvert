@@ -16,6 +16,16 @@ class CloudConfig:
         self.oss_access_key_secret = os.getenv("OSS_ACCESS_KEY_SECRET")
         self.oss_endpoint = os.getenv("OSS_ENDPOINT")
         self.oss_bucket_name = os.getenv("OSS_BUCKET_NAME")
+        # Optional request timeouts to avoid indefinite hangs on some runtimes
+        # Defaults are conservative but safe; override via env if needed.
+        try:
+            self.oss_connect_timeout = int(os.getenv("OSS_CONNECT_TIMEOUT", "15"))
+        except Exception:
+            self.oss_connect_timeout = 15
+        try:
+            self.oss_request_timeout = int(os.getenv("OSS_REQUEST_TIMEOUT", "300"))
+        except Exception:
+            self.oss_request_timeout = 300
         
         # Validate required settings
         required_vars = {
@@ -33,6 +43,18 @@ class CloudConfig:
             )
             logger.error(message)
             raise RuntimeError(message)
+
+        # Apply global defaults for timeouts to OSS SDK
+        try:
+            oss2.defaults.connect_timeout = self.oss_connect_timeout
+            oss2.defaults.request_timeout = self.oss_request_timeout
+            logger.info(
+                f"OSS timeouts configured: connect={self.oss_connect_timeout}s, "
+                f"request={self.oss_request_timeout}s"
+            )
+        except Exception as e:
+            # Non-fatal: proceed with SDK defaults
+            logger.warning(f"Failed to apply OSS timeout defaults: {e}")
 
         self.enabled = True
     
@@ -161,6 +183,7 @@ async def download_file_from_cloud(key: str, file_path: str, max_size: Optional[
         # Pre-check size via HEAD if requested
         if max_size is not None:
             try:
+                logger.info(f"[OSS] HEAD {key} to pre-check size")
                 head = await asyncify(bucket.head_object)(key)
                 # Try headers, fall back to attribute
                 content_length = None
@@ -185,6 +208,7 @@ async def download_file_from_cloud(key: str, file_path: str, max_size: Optional[
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         # Download to file
+        logger.info(f"[OSS] GET {key} -> {dest}")
         await asyncify(bucket.get_object_to_file)(key, str(dest))
 
         # Post-check size if requested
