@@ -6,7 +6,7 @@
 
 - **RKNN转换**: 将ONNX模型转换为RKNN格式，支持RK平台
 - **统一接口**: 可扩展的适配器模式，便于支持更多模型格式
-- **异步处理**: 后台任务处理，支持大模型转换
+- **同步处理**: 转换请求在同一HTTP请求内完成并返回结果
 - **RESTful API**: 清晰的REST API接口，带完整文档
 - **错误处理**: 健壮的错误处理和参数验证
 
@@ -72,7 +72,7 @@ docker run -d \
 
 ## API使用
 
-### 转换ONNX到RKNN
+### 转换ONNX到RKNN（同步）
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/convert/rknn" \
@@ -82,17 +82,23 @@ curl -X POST "http://localhost:8000/api/v1/convert/rknn" \
   -F "hybrid_quant=true"
 ```
 
-### 检查任务状态
+### 检查任务状态（可选）
 
 ```bash
 curl "http://localhost:8000/api/v1/tasks/{task_id}"
 ```
 
-### 下载结果
+### 下载结果（可选）
 
 ```bash
 curl "http://localhost:8000/api/v1/tasks/{task_id}/download" -o model.rknn
 ```
+
+### 行为说明
+
+- 当前服务采用同步处理模式：提交转换请求会阻塞直到转换成功或失败。
+- 如果在“从OSS发起转换”的接口中提供了回调参数，回调会在状态变更时同步发送。
+- 任务查询与结果下载接口仍然保留，便于集成与兼容；但在同步模式下通常在提交请求时即可获得结果。
 
 ## 配置
 

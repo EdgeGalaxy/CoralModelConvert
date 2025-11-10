@@ -32,7 +32,7 @@ setup_exception_handlers(app)
 
 
 @app.get("/", response_model=HealthResponse)
-async def health_check():
+def health_check():
     """Health check endpoint"""
     return HealthResponse(
         status="healthy",
@@ -42,7 +42,7 @@ async def health_check():
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health():
+def health():
     """Health endpoint"""
     return HealthResponse(
         status="healthy",

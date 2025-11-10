@@ -18,7 +18,7 @@ def setup_exception_handlers(app: FastAPI):
     """Setup global exception handlers"""
     
     @app.exception_handler(ModelConversionError)
-    async def model_conversion_error_handler(request: Request, exc: ModelConversionError):
+    def model_conversion_error_handler(request: Request, exc: ModelConversionError):
         logger.error(f"Model conversion error: {str(exc)}")
         return JSONResponse(
             status_code=400,
@@ -30,7 +30,7 @@ def setup_exception_handlers(app: FastAPI):
         )
     
     @app.exception_handler(ModelLoadError)
-    async def model_load_error_handler(request: Request, exc: ModelLoadError):
+    def model_load_error_handler(request: Request, exc: ModelLoadError):
         logger.error(f"Model load error: {str(exc)}")
         return JSONResponse(
             status_code=400,
@@ -42,7 +42,7 @@ def setup_exception_handlers(app: FastAPI):
         )
     
     @app.exception_handler(ModelBuildError)
-    async def model_build_error_handler(request: Request, exc: ModelBuildError):
+    def model_build_error_handler(request: Request, exc: ModelBuildError):
         logger.error(f"Model build error: {str(exc)}")
         return JSONResponse(
             status_code=500,
@@ -54,7 +54,7 @@ def setup_exception_handlers(app: FastAPI):
         )
     
     @app.exception_handler(ModelExportError)
-    async def model_export_error_handler(request: Request, exc: ModelExportError):
+    def model_export_error_handler(request: Request, exc: ModelExportError):
         logger.error(f"Model export error: {str(exc)}")
         return JSONResponse(
             status_code=500,
@@ -66,7 +66,7 @@ def setup_exception_handlers(app: FastAPI):
         )
     
     @app.exception_handler(UnsupportedModelFormatError)
-    async def unsupported_format_error_handler(request: Request, exc: UnsupportedModelFormatError):
+    def unsupported_format_error_handler(request: Request, exc: UnsupportedModelFormatError):
         logger.error(f"Unsupported format error: {str(exc)}")
         return JSONResponse(
             status_code=400,
@@ -78,7 +78,7 @@ def setup_exception_handlers(app: FastAPI):
         )
     
     @app.exception_handler(InvalidParameterError)
-    async def invalid_parameter_error_handler(request: Request, exc: InvalidParameterError):
+    def invalid_parameter_error_handler(request: Request, exc: InvalidParameterError):
         logger.error(f"Invalid parameter error: {str(exc)}")
         return JSONResponse(
             status_code=400,
@@ -90,7 +90,7 @@ def setup_exception_handlers(app: FastAPI):
         )
     
     @app.exception_handler(FileNotFoundError)
-    async def file_not_found_error_handler(request: Request, exc: FileNotFoundError):
+    def file_not_found_error_handler(request: Request, exc: FileNotFoundError):
         logger.error(f"File not found error: {str(exc)}")
         return JSONResponse(
             status_code=404,
@@ -102,7 +102,7 @@ def setup_exception_handlers(app: FastAPI):
         )
     
     @app.exception_handler(PermissionError)
-    async def permission_error_handler(request: Request, exc: PermissionError):
+    def permission_error_handler(request: Request, exc: PermissionError):
         logger.error(f"Permission error: {str(exc)}")
         return JSONResponse(
             status_code=403,
@@ -114,7 +114,7 @@ def setup_exception_handlers(app: FastAPI):
         )
     
     @app.exception_handler(OSError)
-    async def os_error_handler(request: Request, exc: OSError):
+    def os_error_handler(request: Request, exc: OSError):
         logger.error(f"OS error: {str(exc)}")
         return JSONResponse(
             status_code=500,
@@ -126,7 +126,7 @@ def setup_exception_handlers(app: FastAPI):
         )
     
     @app.exception_handler(Exception)
-    async def general_exception_handler(request: Request, exc: Exception):
+    def general_exception_handler(request: Request, exc: Exception):
         logger.exception(f"Unhandled exception: {str(exc)}")
         return JSONResponse(
             status_code=500,

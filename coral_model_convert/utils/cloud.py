@@ -3,7 +3,6 @@
 from typing import Union, Optional
 import os
 import oss2
-from asyncer import asyncify
 from loguru import logger
 from pathlib import Path
 
@@ -72,7 +71,7 @@ class CloudConfig:
 cloud_config = CloudConfig()
 
 
-async def upload_file_to_cloud(file_path: str, key: str) -> str:
+def upload_file_to_cloud(file_path: str, key: str) -> str:
     """Upload a file to cloud storage
     
     Args:
@@ -92,8 +91,8 @@ async def upload_file_to_cloud(file_path: str, key: str) -> str:
     try:
         bucket = cloud_config.get_bucket()
         
-        # Upload file
-        await asyncify(bucket.put_object_from_file)(key, file_path)
+        # Upload file (synchronous)
+        bucket.put_object_from_file(key, file_path)
         
         logger.info(f"File uploaded successfully to cloud: {key}")
         return key
@@ -103,7 +102,7 @@ async def upload_file_to_cloud(file_path: str, key: str) -> str:
         raise
 
 
-async def upload_data_to_cloud(data: Union[str, bytes], key: str) -> str:
+def upload_data_to_cloud(data: Union[str, bytes], key: str) -> str:
     """Upload data directly to cloud storage
     
     Args:
@@ -123,8 +122,8 @@ async def upload_data_to_cloud(data: Union[str, bytes], key: str) -> str:
     try:
         bucket = cloud_config.get_bucket()
         
-        # Upload data
-        await asyncify(bucket.put_object)(key=key, data=data)
+        # Upload data (synchronous)
+        bucket.put_object(key=key, data=data)
         
         logger.info(f"Data uploaded successfully to cloud: {key}")
         return key
@@ -139,7 +138,7 @@ def is_cloud_enabled() -> bool:
     return cloud_config.enabled
 
 
-async def generate_signed_url(key: str, expires: int = 3600) -> str:
+def generate_signed_url(key: str, expires: int = 3600) -> str:
     """Generate a signed URL for the given OSS object key.
 
     Args:
@@ -156,10 +155,10 @@ async def generate_signed_url(key: str, expires: int = 3600) -> str:
         raise ValueError("Cloud storage is not configured")
 
     bucket = cloud_config.get_bucket()
-    return await asyncify(bucket.sign_url)("GET", key, expires=expires)
+    return bucket.sign_url("GET", key, expires=expires)
 
 
-async def download_file_from_cloud(key: str, file_path: str, max_size: Optional[int] = None) -> str:
+def download_file_from_cloud(key: str, file_path: str, max_size: Optional[int] = None) -> str:
     """Download a file from cloud storage to a local path.
 
     Args:
@@ -184,7 +183,7 @@ async def download_file_from_cloud(key: str, file_path: str, max_size: Optional[
         if max_size is not None:
             try:
                 logger.info(f"[OSS] HEAD {key} to pre-check size")
-                head = await asyncify(bucket.head_object)(key)
+                head = bucket.head_object(key)
                 # Try headers, fall back to attribute
                 content_length = None
                 if hasattr(head, "headers") and head.headers is not None:
@@ -209,7 +208,7 @@ async def download_file_from_cloud(key: str, file_path: str, max_size: Optional[
 
         # Download to file
         logger.info(f"[OSS] GET {key} -> {dest}")
-        await asyncify(bucket.get_object_to_file)(key, str(dest))
+        bucket.get_object_to_file(key, str(dest))
 
         # Post-check size if requested
         if max_size is not None and dest.exists():

@@ -1,11 +1,9 @@
-"""API routers for model conversion endpoints"""
+"""API routers for model conversion endpoints (synchronous)"""
 
-import asyncio
-import aiohttp
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 
 from ..models import (
@@ -29,14 +27,14 @@ router = APIRouter(prefix="/api/v1", tags=["conversion"])
 
 
 @router.get("/conversions", response_model=AvailableConversionsResponse)
-async def get_available_conversions():
+def get_available_conversions():
     """Get available conversion paths"""
     conversions = task_manager.adapter.get_available_conversions()
     return AvailableConversionsResponse(conversions=conversions)
 
 
 @router.post("/validate/rknn", response_model=ValidationResponse)
-async def validate_rknn_params(request: RKNNConversionRequest):
+def validate_rknn_params(request: RKNNConversionRequest):
     """Validate RKNN conversion parameters"""
     validation_result = task_manager.adapter.validate_conversion_params(
         source_format="onnx",
@@ -47,8 +45,7 @@ async def validate_rknn_params(request: RKNNConversionRequest):
 
 
 @router.post("/convert/rknn", response_model=ConversionResponse)
-async def convert_to_rknn(
-    background_tasks: BackgroundTasks,
+def convert_to_rknn(
     model_file: UploadFile = File(...),
     dataset_file: Optional[UploadFile] = File(None),
     task_id: Optional[str] = Form(None),
@@ -109,7 +106,8 @@ async def convert_to_rknn(
     
     try:
         with open(model_path, "wb") as f:
-            content = await model_file.read()
+            # Read uploaded file synchronously
+            content = model_file.file.read()
             f.write(content)
         
         # Handle dataset file if provided
@@ -117,35 +115,40 @@ async def convert_to_rknn(
         if dataset_file:
             dataset_path = TEMP_DIR / f"{task_id}_{dataset_file.filename}"
             with open(dataset_path, "wb") as f:
-                content = await dataset_file.read()
+                content = dataset_file.file.read()
                 f.write(content)
         
         # Create output directory for this task
         task_output_dir = OUTPUT_DIR / task_id
         task_output_dir.mkdir(exist_ok=True)
         
-        # Start conversion in background
+        # Run conversion synchronously
         conversion_params = request.model_dump()
         if dataset_path:
             conversion_params["dataset_file"] = str(dataset_path)
-        
-        # Directly schedule on the event loop to avoid BackgroundTasks issues
-        asyncio.create_task(
-            task_manager.run_conversion(
-                task_id=task_id,
-                source_format="onnx",
-                target_format="rknn",
-                model_path=str(model_path),
-                output_dir=str(task_output_dir),
-                **conversion_params,
-            )
+
+        task_manager.run_conversion(
+            task_id=task_id,
+            source_format="onnx",
+            target_format="rknn",
+            model_path=str(model_path),
+            output_dir=str(task_output_dir),
+            **conversion_params,
         )
-        
+
+        task = task_manager.get_task(task_id)
+        status = task.status if task else ConversionStatus.FAILED
+        message = (
+            "Conversion completed successfully"
+            if status == ConversionStatus.COMPLETED
+            else "Conversion finished with errors"
+        )
+
         return ConversionResponse(
             task_id=task_id,
-            status=ConversionStatus.PENDING,
-            message="Conversion task created successfully",
-            created_at=datetime.utcnow().isoformat()
+            status=status,
+            message=message,
+            created_at=(task.created_at if task else datetime.utcnow().isoformat()),
         )
         
     except Exception as e:
@@ -159,7 +162,7 @@ async def convert_to_rknn(
 
 
 @router.get("/tasks/{task_id}", response_model=ConversionResult)
-async def get_task_status(task_id: str):
+def get_task_status(task_id: str):
     """Get conversion task status"""
     task = task_manager.get_task(task_id)
     if not task:
@@ -169,10 +172,8 @@ async def get_task_status(task_id: str):
 
 
 @router.post("/convert/rknn/url", response_model=ConversionResponse)
-async def convert_to_rknn_from_url(
+def convert_to_rknn_from_url(
     request: RKNNConversionURLRequest,
-    background_tasks: BackgroundTasks,
-    is_sync: bool = False,
 ):
     """Convert ONNX model to RKNN format from URL"""
     
@@ -244,56 +245,37 @@ async def convert_to_rknn_from_url(
         # Prepare paths
         model_path = TEMP_DIR / f"{task_id}_model.onnx"
 
-        if is_sync:
-            # Run conversion synchronously
-            await task_manager.run_conversion_from_url(
-                task_id=task_id,
-                model_oss_key=request.model_oss_key,
-                model_path=str(model_path),
-                output_dir=str(task_output_dir),
-                output_oss_key=request.output_oss_key,
-                **conversion_request.model_dump(),
-            )
+        # Run conversion synchronously
+        task_manager.run_conversion_from_url(
+            task_id=task_id,
+            model_oss_key=request.model_oss_key,
+            model_path=str(model_path),
+            output_dir=str(task_output_dir),
+            output_oss_key=request.output_oss_key,
+            **conversion_request.model_dump(),
+        )
 
-            task = task_manager.get_task(task_id)
-            status = task.status if task else ConversionStatus.FAILED
-            message = (
-                "Conversion completed successfully from URL"
-                if status == ConversionStatus.COMPLETED
-                else "Conversion finished with errors from URL"
-            )
+        task = task_manager.get_task(task_id)
+        status = task.status if task else ConversionStatus.FAILED
+        message = (
+            "Conversion completed successfully from URL"
+            if status == ConversionStatus.COMPLETED
+            else "Conversion finished with errors from URL"
+        )
 
-            return ConversionResponse(
-                task_id=task_id,
-                status=status,
-                message=message,
-                created_at=(task.created_at if task else datetime.utcnow().isoformat()),
-            )
-        else:
-            # Schedule conversion using FastAPI BackgroundTasks
-            background_tasks.add_task(
-                task_manager.run_conversion_from_url,
-                task_id=task_id,
-                model_oss_key=request.model_oss_key,
-                model_path=str(model_path),
-                output_dir=str(task_output_dir),
-                output_oss_key=request.output_oss_key,
-                **conversion_request.model_dump(),
-            )
-
-            return ConversionResponse(
-                task_id=task_id,
-                status=ConversionStatus.PENDING,
-                message="Conversion task created successfully from URL",
-                created_at=datetime.utcnow().isoformat(),
-            )
+        return ConversionResponse(
+            task_id=task_id,
+            status=status,
+            message=message,
+            created_at=(task.created_at if task else datetime.utcnow().isoformat()),
+        )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create conversion task: {str(e)}")
 
 
 @router.get("/tasks/{task_id}/download")
-async def download_result(task_id: str):
+def download_result(task_id: str):
     """Download converted model"""
     task = task_manager.get_task(task_id)
     if not task:

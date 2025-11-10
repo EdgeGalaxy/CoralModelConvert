@@ -1,8 +1,7 @@
-"""Task management for async conversion operations"""
+"""Task management for synchronous conversion operations"""
 
 import uuid
-import asyncio
-import aiohttp
+import requests
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 from enum import Enum
@@ -37,7 +36,7 @@ class CallbackConfig:
 
 
 class TaskManager:
-    """Manages async conversion tasks"""
+    """Manages synchronous conversion tasks"""
     
     def __init__(self):
         self.tasks: Dict[str, ConversionResult] = {}
@@ -89,13 +88,14 @@ class TaskManager:
             
             callback_cfg = self.callbacks.get(task_id)
             if callback_cfg and status in callback_cfg.notify_on:
-                asyncio.create_task(self._dispatch_callback(task_id, callback_cfg))
+                # Dispatch callback synchronously
+                self._dispatch_callback(task_id, callback_cfg)
                 if status in [ConversionStatus.COMPLETED, ConversionStatus.FAILED]:
                     # 清理已完成任务的回调配置
                     self.callbacks.pop(task_id, None)
 
-    async def _dispatch_callback(self, task_id: str, callback_cfg: CallbackConfig):
-        """Send callback notification with task status"""
+    def _dispatch_callback(self, task_id: str, callback_cfg: CallbackConfig):
+        """Send callback notification with task status (synchronous)"""
         task = self.tasks.get(task_id)
         if not task:
             logger.warning(f"Callback skipped, task {task_id} not found")
@@ -114,27 +114,22 @@ class TaskManager:
         if callback_cfg.token:
             headers["Authorization"] = f"Bearer {callback_cfg.token}"
 
-        timeout = aiohttp.ClientTimeout(total=15)
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    callback_cfg.url, json=payload, headers=headers
-                ) as response:
-                    if response.status >= 400:
-                        text = await response.text()
-                        logger.error(
-                            f"Callback to {callback_cfg.url} failed: {response.status} - {text}"
-                        )
-                    else:
-                        logger.info(
-                            f"Callback to {callback_cfg.url} succeeded for task {task_id}"
-                        )
+            response = requests.post(callback_cfg.url, json=payload, headers=headers, timeout=15)
+            if response.status_code >= 400:
+                logger.error(
+                    f"Callback to {callback_cfg.url} failed: {response.status_code} - {response.text}"
+                )
+            else:
+                logger.info(
+                    f"Callback to {callback_cfg.url} succeeded for task {task_id}"
+                )
         except Exception as exc:
             logger.exception(
                 f"Error while sending callback to {callback_cfg.url}: {exc}"
             )
-    
-    async def run_conversion(
+
+    def run_conversion(
         self,
         task_id: str,
         source_format: str,
@@ -143,24 +138,19 @@ class TaskManager:
         output_dir: str,
         **kwargs
     ):
-        """Run conversion in background"""
+        """Run conversion synchronously"""
         try:
             self.update_task_status(task_id, ConversionStatus.PROCESSING)
             logger.info(f"Starting conversion task {task_id}")
             
-            # Create a wrapper function to handle keyword arguments
-            def convert_wrapper():
-                return self.adapter.convert_model(
-                    source_format=source_format,
-                    target_format=target_format,
-                    model_path=model_path,
-                    output_dir=output_dir,
-                    **kwargs
-                )
-            
-            # Run conversion in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, convert_wrapper)
+            # Run conversion synchronously
+            result = self.adapter.convert_model(
+                source_format=source_format,
+                target_format=target_format,
+                model_path=model_path,
+                output_dir=output_dir,
+                **kwargs
+            )
             
             self.update_task_status(
                 task_id,
@@ -179,7 +169,7 @@ class TaskManager:
                 error_message=str(e)
             )
 
-    async def run_conversion_from_url(
+    def run_conversion_from_url(
         self,
         task_id: str,
         model_oss_key: str,
@@ -188,29 +178,24 @@ class TaskManager:
         output_oss_key: Optional[str] = None,
         **kwargs
     ):
-        """Download model via OSS key and run conversion in background"""
+        """Download model via OSS key and run conversion synchronously"""
         try:
             self.update_task_status(task_id, ConversionStatus.PROCESSING)
             logger.info(f"Starting URL-based conversion task {task_id}")
             
             # Download model directly from OSS to target path
             logger.info(f"Downloading model from OSS: {model_oss_key} -> {model_path}")
-            await download_file_from_cloud(model_oss_key, model_path, max_size=MAX_FILE_SIZE)
+            download_file_from_cloud(model_oss_key, model_path, max_size=MAX_FILE_SIZE)
             logger.info(f"Model downloaded to: {model_path}")
             
-            # Create a wrapper function for conversion
-            def convert_wrapper():
-                return self.adapter.convert_model(
-                    source_format="onnx",
-                    target_format="rknn",
-                    model_path=model_path,
-                    output_dir=output_dir,
-                    **kwargs
-                )
-            
-            # Run conversion in thread pool
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, convert_wrapper)
+            # Run conversion synchronously
+            result = self.adapter.convert_model(
+                source_format="onnx",
+                target_format="rknn",
+                model_path=model_path,
+                output_dir=output_dir,
+                **kwargs
+            )
             
             # Upload to cloud if oss_key is provided and cloud is enabled
             cloud_key = None
@@ -219,7 +204,7 @@ class TaskManager:
                     output_path = result.get("output_path")
                     if output_path and Path(output_path).exists():
                         logger.info(f"Uploading converted model to cloud: {output_oss_key}")
-                        cloud_key = await upload_file_to_cloud(output_path, output_oss_key)
+                        cloud_key = upload_file_to_cloud(output_path, output_oss_key)
                         logger.info(f"Model uploaded successfully to: {cloud_key}")
                 except Exception as e:
                     logger.error(f"Failed to upload to cloud: {str(e)}")
@@ -231,7 +216,7 @@ class TaskManager:
             if cloud_key:
                 result["cloud_key"] = cloud_key
                 try:
-                    result["cloud_url"] = await generate_signed_url(cloud_key)
+                    result["cloud_url"] = generate_signed_url(cloud_key)
                 except Exception as e:
                     logger.warning(f"Failed to generate signed URL for {cloud_key}: {e}")
             
