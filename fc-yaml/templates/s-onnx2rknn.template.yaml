@@ -1,0 +1,61 @@
+edition: 3.0.0
+name: ${FC_PROJECT_NAME}
+access: default
+resources:
+  fcDemo:
+    component: fc3
+    props:
+      region: ${OSS_REGION}
+      handler: index.handler
+      role: ${SERVICE_ROLE}
+      disableOndemand: false
+      description: ''
+      timeout: 600
+      diskSize: 10240
+      internetAccess: true
+      resourceGroupId: ${RESOURCE_GROUP_ID}
+      instanceIsolationMode: SHARE
+      logConfig:
+        enableRequestMetrics: true
+        enableInstanceMetrics: true
+        logBeginRule: DefaultRegex
+        project: ${LOG_PROJECT}
+        enableCustomExtraLog: true
+        logstore: ${LOG_STORE}
+      functionName: onnx2rknn
+      sessionAffinity: NONE
+      runtime: custom-container
+      cpu: 4
+      customContainerConfig:
+        image: ${IMAGE}
+        command: []
+        port: 8001
+        entrypoint:
+          - python3
+          - run.py
+      instanceConcurrency: 10
+      memorySize: 8192
+      environmentVariables:
+        OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID}
+        OSS_BUCKET_NAME: ${OSS_BUCKET}
+        OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET}
+        OSS_ENDPOINT: ${OSS_ENDPOINT}
+      vpcConfig:
+        securityGroupId: ${SECURITY_GROUP_ID}
+        vpcId: ${VPC_ID}
+        vSwitchIds:
+          - ${VSWITCH_ID}
+      triggers:
+        - triggerConfig:
+            methods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+            authType: anonymous
+            disableURLInternet: false
+          triggerName: httpTrigger
+          description: ''
+          qualifier: LATEST
+          triggerType: http
+
